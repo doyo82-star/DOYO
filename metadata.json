@@ -1,0 +1,6 @@
+{
+  "name": "스마트 도서관 예약 시스템",
+  "description": "Google Apps Script 웹앱 API와 실시간 연동되는 모던하고 깔끔한 도서관 도서 검색 및 예약 웹 애플리케이션",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
