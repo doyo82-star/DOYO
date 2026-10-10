@@ -644,182 +644,7 @@
           </p>
 
           <div class="relative bg-stone-900 text-stone-200 rounded-xl p-4 font-mono text-[11px] overflow-x-auto max-h-56">
-            <pre id="recommended-gas-code">/**
- * 스마트 도서관 예약 시스템 백엔드 (Google Apps Script)
- * 구글 스프레드시트 > 확장 프로그램 > Apps Script에 붙여넣기 후 새 배포 진행
- */
-const SPREADSHEET = SpreadsheetApp.getActiveSpreadsheet();
-
-function getOrCreateSheet(sheetName, headers) {
-  let sheet = SPREADSHEET.getSheetByName(sheetName);
-  if (!sheet) {
-    sheet = SPREADSHEET.insertSheet(sheetName);
-    if (headers && headers.length > 0) {
-      sheet.appendRow(headers);
-    }
-  }
-  return sheet;
-}
-
-// 1. 도서 목록 조회 (GET)
-function doGet(e) {
-  const action = (e && e.parameter && e.parameter.action) || 'getBooks';
-  
-  if (action === 'getBooks') {
-    return getBooks();
-  } else if (action === 'getReservations') {
-    const email = e.parameter.email || '';
-    return getReservations(email);
-  }
-  
-  return ContentService.createTextOutput(JSON.stringify({ status: 'ok', msg: '도서관 API 서비스 작동 중' }))
-    .setMimeType(ContentService.MimeType.JSON);
-}
-
-function getBooks() {
-  const sheet = getOrCreateSheet('도서', ['도서코드', '도서명', '저자', '카테고리', '대출상태', 'ISBN', '설명']);
-  const data = sheet.getDataRange().getValues();
-  
-  // 데이터가 헤더밖에 없으면 기본 도서 자동 등록
-  if (data.length <= 1) {
-    const initialBooks = [
-      ['B-101', '클린 코드', '로버트 C. 마틴', '컴퓨터/IT', '대출가능', '9788966260959', '애자일 소프트웨어 장인 정신'],
-      ['B-102', '불편한 편의점', '김호연', '소설/문학', '대출가능', '9791161571188', '청파동 골목 작은 편의점 이야기'],
-      ['B-103', '소년이 온다', '한강', '소설/문학', '대출가능', '9788936434120', '노벨문학상 수상 작가 한강의 대표작'],
-      ['B-104', '인공지능의 미래', '이동수', '컴퓨터/IT', '대출가능', '9791191043321', '생성형 AI와 지능형 에이전트']
-    ];
-    initialBooks.forEach(row => sheet.appendRow(row));
-  }
-  
-  const refreshed = sheet.getDataRange().getValues();
-  const books = [];
-  for (let i = 1; i < refreshed.length; i++) {
-    const row = refreshed[i];
-    if (!row[0] && !row[1]) continue;
-    books.push({
-      id: String(row[0] || 'B-' + i),
-      title: String(row[1] || ''),
-      author: String(row[2] || ''),
-      category: String(row[3] || '일반'),
-      status: String(row[4] || '대출가능'),
-      isbn: String(row[5] || ''),
-      description: String(row[6] || '')
-    });
-  }
-  
-  return ContentService.createTextOutput(JSON.stringify(books))
-    .setMimeType(ContentService.MimeType.JSON);
-}
-
-// 2. 예약 신청 및 취소 (POST)
-function doPost(e) {
-  try {
-    let payload = {};
-    if (e && e.postData && e.postData.contents) {
-      payload = JSON.parse(e.postData.contents);
-    }
-    const action = payload.action;
-    
-    if (action === 'createReservation') {
-      return createReservation(payload);
-    } else if (action === 'cancelReservation') {
-      return cancelReservation(payload);
-    }
-    
-    return ContentService.createTextOutput(JSON.stringify({ success: false, message: '알 수 없는 액션' }))
-      .setMimeType(ContentService.MimeType.JSON);
-  } catch (err) {
-    return ContentService.createTextOutput(JSON.stringify({ success: false, message: err.toString() }))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-}
-
-function createReservation(payload) {
-  const bookSheet = getOrCreateSheet('도서', ['도서코드', '도서명', '저자', '카테고리', '대출상태', 'ISBN', '설명']);
-  const resSheet = getOrCreateSheet('예약', ['예약번호', '도서코드', '도서명', '예약자', '이메일', '신청일시', '상태']);
-  
-  const bookId = payload.bookId;
-  const userName = payload.userName;
-  const userEmail = payload.userEmail;
-  
-  // 도서명 찾기 및 상태 '예약중'으로 변경
-  const bookData = bookSheet.getDataRange().getValues();
-  let bookTitle = '도서';
-  for (let i = 1; i < bookData.length; i++) {
-    if (String(bookData[i][0]) === String(bookId)) {
-      bookTitle = bookData[i][1];
-      bookSheet.getRange(i + 1, 5).setValue('예약중');
-      break;
-    }
-  }
-  
-  const reservationId = 'RES-' + Utilities.formatDate(new Date(), 'GMT+9', 'yyyyMMdd-HHmmss');
-  const nowStr = Utilities.formatDate(new Date(), 'GMT+9', 'yyyy-MM-dd HH:mm:ss');
-  
-  resSheet.appendRow([reservationId, bookId, bookTitle, userName, userEmail, nowStr, '예약완료']);
-  
-  return ContentService.createTextOutput(JSON.stringify({
-    success: true,
-    reservationId: reservationId,
-    message: '예약이 성공적으로 완료되었습니다.'
-  })).setMimeType(ContentService.MimeType.JSON);
-}
-
-function getReservations(email) {
-  const resSheet = getOrCreateSheet('예약', ['예약번호', '도서코드', '도서명', '예약자', '이메일', '신청일시', '상태']);
-  const data = resSheet.getDataRange().getValues();
-  const list = [];
-  
-  for (let i = 1; i < data.length; i++) {
-    const row = data[i];
-    const rowEmail = String(row[4] || '').trim().toLowerCase();
-    if (!email || rowEmail === email.trim().toLowerCase()) {
-      list.push({
-        reservationId: String(row[0]),
-        bookId: String(row[1]),
-        bookTitle: String(row[2]),
-        userName: String(row[3]),
-        userEmail: String(row[4]),
-        reservationDate: String(row[5]),
-        status: String(row[6])
-      });
-    }
-  }
-  
-  return ContentService.createTextOutput(JSON.stringify(list))
-    .setMimeType(ContentService.MimeType.JSON);
-}
-
-function cancelReservation(payload) {
-  const resSheet = getOrCreateSheet('예약', ['예약번호', '도서코드', '도서명', '예약자', '이메일', '신청일시', '상태']);
-  const bookSheet = getOrCreateSheet('도서', ['도서코드', '도서명', '저자', '카테고리', '대출상태', 'ISBN', '설명']);
-  const resId = payload.reservationId;
-  
-  const resData = resSheet.getDataRange().getValues();
-  let bookId = '';
-  for (let i = 1; i < resData.length; i++) {
-    if (String(resData[i][0]) === String(resId)) {
-      bookId = resData[i][1];
-      resSheet.getRange(i + 1, 7).setValue('취소됨');
-      break;
-    }
-  }
-  
-  if (bookId) {
-    const bookData = bookSheet.getDataRange().getValues();
-    for (let i = 1; i < bookData.length; i++) {
-      if (String(bookData[i][0]) === String(bookId)) {
-        bookSheet.getRange(i + 1, 5).setValue('대출가능');
-        break;
-      }
-    }
-  }
-  
-  return ContentService.createTextOutput(JSON.stringify({
-    success: true,
-    message: '예약이 성공적으로 취소되었습니다.'
-  })).setMimeType(ContentService.MimeType.JSON);
-}</pre>
+            <pre><code id="recommended-gas-code"></code></pre>
           </div>
         </div>
 
@@ -927,8 +752,11 @@ function cancelReservation(payload) {
      * Connected to Google Apps Script Web App
      */
 
+    // Environment variable override (Vercel / Vite env support)
+    const ENV_GAS_URL = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_GAS_URL) ? import.meta.env.VITE_GAS_URL : '';
+
     // Default Google Apps Script URL as updated by user
-    const DEFAULT_GAS_URL = "https://script.google.com/macros/s/AKfycbyklKrB7YUSSzRJxbCtdjLUrTLgcPDZCzP-lf2cxlNDREhgjumA_FaXxvzly8omWLRVuw/exec";
+    const DEFAULT_GAS_URL = ENV_GAS_URL || "https://script.google.com/macros/s/AKfycbyklKrB7YUSSzRJxbCtdjLUrTLgcPDZCzP-lf2cxlNDREhgjumA_FaXxvzly8omWLRVuw/exec";
     
     // Dynamic GAS URL from localStorage (migrating any obsolete default if present)
     let savedUrl = localStorage.getItem('lib_gas_url');
@@ -1048,12 +876,192 @@ function cancelReservation(payload) {
 
     state.sampleBooks = [...SAMPLE_BOOKS];
 
+    const RECOMMENDED_GAS_SCRIPT = `/**
+ * 스마트 도서관 예약 시스템 백엔드 (Google Apps Script)
+ * 구글 스프레드시트 > 확장 프로그램 > Apps Script에 붙여넣기 후 새 배포 진행
+ */
+const SPREADSHEET = SpreadsheetApp.getActiveSpreadsheet();
+
+function getOrCreateSheet(sheetName, headers) {
+  let sheet = SPREADSHEET.getSheetByName(sheetName);
+  if (!sheet) {
+    sheet = SPREADSHEET.insertSheet(sheetName);
+    if (headers && headers.length > 0) {
+      sheet.appendRow(headers);
+    }
+  }
+  return sheet;
+}
+
+// 1. 도서 목록 조회 (GET)
+function doGet(e) {
+  const action = (e && e.parameter && e.parameter.action) || 'getBooks';
+  
+  if (action === 'getBooks') {
+    return getBooks();
+  } else if (action === 'getReservations') {
+    const email = e.parameter.email || '';
+    return getReservations(email);
+  }
+  
+  return ContentService.createTextOutput(JSON.stringify({ status: 'ok', msg: '도서관 API 서비스 작동 중' }))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function getBooks() {
+  const sheet = getOrCreateSheet('도서', ['도서코드', '도서명', '저자', '카테고리', '대출상태', 'ISBN', '설명']);
+  const data = sheet.getDataRange().getValues();
+  
+  // 데이터가 헤더밖에 없으면 기본 도서 자동 등록
+  if (data.length <= 1) {
+    const initialBooks = [
+      ['B-101', '클린 코드', '로버트 C. 마틴', '컴퓨터/IT', '대출가능', '9788966260959', '애자일 소프트웨어 장인 정신'],
+      ['B-102', '불편한 편의점', '김호연', '소설/문학', '대출가능', '9791161571188', '청파동 골목 작은 편의점 이야기'],
+      ['B-103', '소년이 온다', '한강', '소설/문학', '대출가능', '9788936434120', '노벨문학상 수상 작가 한강의 대표작'],
+      ['B-104', '인공지능의 미래', '이동수', '컴퓨터/IT', '대출가능', '9791191043321', '생성형 AI와 지능형 에이전트']
+    ];
+    initialBooks.forEach(row => sheet.appendRow(row));
+  }
+  
+  const refreshed = sheet.getDataRange().getValues();
+  const books = [];
+  for (let i = 1; i < refreshed.length; i++) {
+    const row = refreshed[i];
+    if (!row[0] && !row[1]) continue;
+    books.push({
+      id: String(row[0] || 'B-' + i),
+      title: String(row[1] || ''),
+      author: String(row[2] || ''),
+      category: String(row[3] || '일반'),
+      status: String(row[4] || '대출가능'),
+      isbn: String(row[5] || ''),
+      description: String(row[6] || '')
+    });
+  }
+  
+  return ContentService.createTextOutput(JSON.stringify(books))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+// 2. 예약 신청 및 취소 (POST)
+function doPost(e) {
+  try {
+    let payload = {};
+    if (e && e.postData && e.postData.contents) {
+      payload = JSON.parse(e.postData.contents);
+    }
+    const action = payload.action;
+    
+    if (action === 'createReservation') {
+      return createReservation(payload);
+    } else if (action === 'cancelReservation') {
+      return cancelReservation(payload);
+    }
+    
+    return ContentService.createTextOutput(JSON.stringify({ success: false, message: '알 수 없는 액션' }))
+      .setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({ success: false, message: err.toString() }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+function createReservation(payload) {
+  const bookSheet = getOrCreateSheet('도서', ['도서코드', '도서명', '저자', '카테고리', '대출상태', 'ISBN', '설명']);
+  const resSheet = getOrCreateSheet('예약', ['예약번호', '도서코드', '도서명', '예약자', '이메일', '신청일시', '상태']);
+  
+  const bookId = payload.bookId;
+  const userName = payload.userName;
+  const userEmail = payload.userEmail;
+  
+  const bookData = bookSheet.getDataRange().getValues();
+  let bookTitle = '도서';
+  for (let i = 1; i < bookData.length; i++) {
+    if (String(bookData[i][0]) === String(bookId)) {
+      bookTitle = bookData[i][1];
+      bookSheet.getRange(i + 1, 5).setValue('예약중');
+      break;
+    }
+  }
+  
+  const reservationId = 'RES-' + Utilities.formatDate(new Date(), 'GMT+9', 'yyyyMMdd-HHmmss');
+  const nowStr = Utilities.formatDate(new Date(), 'GMT+9', 'yyyy-MM-dd HH:mm:ss');
+  
+  resSheet.appendRow([reservationId, bookId, bookTitle, userName, userEmail, nowStr, '예약완료']);
+  
+  return ContentService.createTextOutput(JSON.stringify({
+    success: true,
+    reservationId: reservationId,
+    message: '예약이 성공적으로 완료되었습니다.'
+  })).setMimeType(ContentService.MimeType.JSON);
+}
+
+function getReservations(email) {
+  const resSheet = getOrCreateSheet('예약', ['예약번호', '도서코드', '도서명', '예약자', '이메일', '신청일시', '상태']);
+  const data = resSheet.getDataRange().getValues();
+  const list = [];
+  
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    const rowEmail = String(row[4] || '').trim().toLowerCase();
+    if (!email || rowEmail === email.trim().toLowerCase()) {
+      list.push({
+        reservationId: String(row[0]),
+        bookId: String(row[1]),
+        bookTitle: String(row[2]),
+        userName: String(row[3]),
+        userEmail: String(row[4]),
+        reservationDate: String(row[5]),
+        status: String(row[6])
+      });
+    }
+  }
+  
+  return ContentService.createTextOutput(JSON.stringify(list))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function cancelReservation(payload) {
+  const resSheet = getOrCreateSheet('예약', ['예약번호', '도서코드', '도서명', '예약자', '이메일', '신청일시', '상태']);
+  const bookSheet = getOrCreateSheet('도서', ['도서코드', '도서명', '저자', '카테고리', '대출상태', 'ISBN', '설명']);
+  const resId = payload.reservationId;
+  
+  const resData = resSheet.getDataRange().getValues();
+  let bookId = '';
+  for (let i = 1; i < resData.length; i++) {
+    if (String(resData[i][0]) === String(resId)) {
+      bookId = resData[i][1];
+      resSheet.getRange(i + 1, 7).setValue('취소됨');
+      break;
+    }
+  }
+  
+  if (bookId) {
+    const bookData = bookSheet.getDataRange().getValues();
+    for (let i = 1; i < bookData.length; i++) {
+      if (String(bookData[i][0]) === String(bookId)) {
+        bookSheet.getRange(i + 1, 5).setValue('대출가능');
+        break;
+      }
+    }
+  }
+  
+  return ContentService.createTextOutput(JSON.stringify({
+    success: true,
+    message: '예약이 성공적으로 취소되었습니다.'
+  })).setMimeType(ContentService.MimeType.JSON);
+}`;
+
     // Initialize application on DOM load
     document.addEventListener('DOMContentLoaded', () => {
       initApp();
     });
 
     function initApp() {
+      // Inject code snippet
+      const codeEl = document.getElementById('recommended-gas-code');
+      if (codeEl) codeEl.textContent = RECOMMENDED_GAS_SCRIPT;
+
       // Set saved inputs
       const emailInput = document.getElementById('lookup-email-input');
       if (emailInput && state.userEmail) {
@@ -2076,7 +2084,7 @@ function cancelReservation(payload) {
     }
 
     function copyGasScriptCode() {
-      const code = document.getElementById('recommended-gas-code').innerText;
+      const code = typeof RECOMMENDED_GAS_SCRIPT !== 'undefined' ? RECOMMENDED_GAS_SCRIPT : (document.getElementById('recommended-gas-code')?.innerText || '');
       navigator.clipboard.writeText(code).then(() => {
         const btn = document.getElementById('copy-script-btn');
         const orig = btn.innerHTML;
